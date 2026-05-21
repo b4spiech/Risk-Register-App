@@ -27,9 +27,9 @@ tsconfig.json
 requirements.txt
 ```
 
-## Run locally
+## Run locally (two-process dev)
 
-Two processes. Backend on `:8000`, frontend on `:5173` proxying `/api` to backend.
+Backend on `:8000`, frontend on `:5173` proxying `/api/*` to backend.
 
 ```bash
 # 1. Backend
@@ -42,9 +42,26 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The home screen has a "Risk Registers" button →
-project list (Active projects, with open-risk count + worst severity) → project
-detail (heatmap + cards, with view tabs and an entry form).
+Open http://localhost:5173. Home → "Risk Registers" → project list → project detail
+(heatmap + cards, with view tabs and an entry form).
+
+## Run as a single service (production shape)
+
+FastAPI serves both the API at `/api/*` and the built React SPA at `/`.
+
+```bash
+npm install && npm run build           # produces ./dist
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Now open http://localhost:8000. Client-side routes (e.g. `/projects/3`) fall back
+to `index.html` so React Router can take over.
+
+## Deploy (Railpack)
+
+`railpack.json` declares Python 3.12 + Node 20, runs `npm ci && npm run build` after
+`pip install`, then starts `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. No
+additional config needed on the platform — push the branch and it builds.
 
 ## Tests
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "python",
+  "packages": {
+    "python": "3.12",
+    "node": "20"
+  },
+  "steps": {
+    "frontend": {
+      "inputs": [{ "step": "install" }],
+      "commands": [
+        "npm ci",
+        "npm run build"
+      ]
+    }
+  },
+  "deploy": {
+    "inputs": [
+      { "step": "frontend", "include": ["."] }
+    ],
+    "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+  }
+}
