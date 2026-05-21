@@ -7,7 +7,20 @@
   },
   "steps": {
     "frontend": {
-      "inputs": [{ "step": "install" }],
+      "inputs": [
+        { "step": "install" },
+        {
+          "local": true,
+          "include": [
+            "package.json",
+            "package-lock.json",
+            "tsconfig.json",
+            "vite.config.ts",
+            "index.html",
+            "src"
+          ]
+        }
+      ],
       "commands": [
         "npm ci",
         "npm run build"
@@ -16,7 +29,11 @@
   },
   "deploy": {
     "inputs": [
-      { "step": "frontend", "include": ["."] }
+      { "step": "frontend" },
+      {
+        "local": true,
+        "include": ["app"]
+      }
     ],
     "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
   }
