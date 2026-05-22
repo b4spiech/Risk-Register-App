@@ -72,7 +72,7 @@ class MockStore:
             ("CRM Rollout", "Active"),
             ("Warehouse Robotics Pilot", "Active"),
             ("Legacy Mainframe Sunset", "On Hold"),
-            ("Annual Audit Prep", "Complete"),
+            ("Annual Audit Prep", "Completed"),
         ]
         for title, status in seed_projects:
             pid = next(self._project_ids)

@@ -1,4 +1,4 @@
-export type ProjectStatus = 'Active' | 'On Hold' | 'Complete' | 'Cancelled';
+export type ProjectStatus = 'Active' | 'On Hold' | 'Completed' | 'Cancelled';
 export type PMOAction = 'Avoid' | 'Mitigate' | 'Transfer' | 'Escalate' | 'Accept' | 'Ignore';
 export type RiskStatus = 'Active' | 'Monitoring' | 'Closed';
 export type ResponseStatus = 'Not Started' | 'In Progress' | 'Complete';

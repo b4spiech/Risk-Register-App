@@ -17,15 +17,12 @@ GET_PROJECTS_URL = os.environ.get("Get_Projects_URL")
 
 
 def _extract_status(row: dict[str, Any]) -> Optional[str]:
-    """SharePoint's Status column key can collide with reserved names and
-    get auto-renamed at creation. Try `Status` first, then any case-
-    insensitive match."""
-    if "Status" in row:
-        return row["Status"]
-    for k, v in row.items():
-        if k.lower() == "status":
-            return v
-    return None
+    """SharePoint Choice columns come back as {Id, Value} objects, not plain
+    strings. Read .Value when nested, otherwise pass through."""
+    status = row.get("Status")
+    if isinstance(status, dict):
+        return status.get("Value")
+    return status
 
 
 class SPAStaticFiles(StaticFiles):

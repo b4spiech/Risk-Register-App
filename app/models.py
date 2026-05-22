@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
-ProjectStatusT = Literal["Active", "On Hold", "Complete", "Cancelled"]
+ProjectStatusT = Literal["Active", "On Hold", "Completed", "Cancelled"]
 PMOActionT = Literal["Avoid", "Mitigate", "Transfer", "Escalate", "Accept", "Ignore"]
 RiskStatusT = Literal["Active", "Monitoring", "Closed"]
 ResponseStatusT = Literal["Not Started", "In Progress", "Complete"]
