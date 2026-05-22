@@ -1,9 +1,54 @@
 from datetime import date
 from itertools import count
 from threading import Lock
-from typing import Optional
+from typing import Any, Optional
 
 from .models import Project, Risk, RiskCreate, RiskUpdate
+
+SHARED_RESPONSE_FIELDS = {
+    "ResponseOwner",
+    "ResponsePlan",
+    "ResponseTargetDate",
+    "ResponseStatus",
+}
+ALL_RESPONSE_FIELDS = SHARED_RESPONSE_FIELDS | {
+    "TransferredTo",
+    "TransferMechanism",
+    "EscalatedTo",
+    "AcceptanceType",
+    "TriggerCondition",
+    "ContingencyPlan",
+    "ContingencyReserve",
+}
+
+
+def _relevant_fields(action: Optional[str], acceptance_type: Optional[str]) -> set[str]:
+    if action in ("Avoid", "Mitigate"):
+        return set(SHARED_RESPONSE_FIELDS)
+    if action == "Transfer":
+        return SHARED_RESPONSE_FIELDS | {"TransferredTo", "TransferMechanism"}
+    if action == "Escalate":
+        return SHARED_RESPONSE_FIELDS | {"EscalatedTo"}
+    if action == "Accept":
+        if acceptance_type == "Active":
+            return SHARED_RESPONSE_FIELDS | {
+                "AcceptanceType",
+                "TriggerCondition",
+                "ContingencyPlan",
+                "ContingencyReserve",
+            }
+        # Passive or undecided
+        return {"AcceptanceType"}
+    return set()  # Ignore, or no action
+
+
+def _clear_irrelevant(data: dict[str, Any]) -> dict[str, Any]:
+    """Backstop the form's clear-on-switch — null fields that don't belong
+    to the current tactic so they never leak into storage."""
+    keep = _relevant_fields(data.get("PMOAction"), data.get("AcceptanceType"))
+    for f in ALL_RESPONSE_FIELDS - keep:
+        data[f] = None
+    return data
 
 
 class MockStore:
@@ -33,35 +78,125 @@ class MockStore:
             pid = next(self._project_ids)
             self._projects[pid] = Project(ID=pid, Title=title, ProjectStatus=status)
 
-        seed_risks: list[tuple[str, str, int, int, str, Optional[str], str, int]] = [
-            ("Vendor delivery slips", "Vendor has missed two milestones; integration phase at risk.", 4, 4, "Mitigate", "alice@kendallgroup.com", "Active", 1),
-            ("Data migration corruption", "Possible loss of historical transactions in cutover.", 3, 5, "Mitigate", "bob@kendallgroup.com", "Active", 1),
-            ("User training gap", "Floor staff have not been onboarded to new screens.", 3, 3, "Mitigate", "carol@kendallgroup.com", "Monitoring", 1),
-            ("Network bandwidth", "WAN may not handle batch sync windows.", 2, 4, "Accept", None, "Active", 1),
-            ("Scope creep", "Stakeholders adding modules mid-build.", 4, 3, "Mitigate", "dan@kendallgroup.com", "Active", 1),
-            ("Steering committee turnover", "Exec sponsor retiring mid-project.", 2, 2, "Ignore", None, "Closed", 1),
-            ("CRM data quality", "Account records in source system are inconsistent.", 4, 4, "Mitigate", "eve@kendallgroup.com", "Active", 2),
-            ("Sales adoption", "Reps may resist new pipeline workflow.", 3, 3, "Mitigate", "frank@kendallgroup.com", "Monitoring", 2),
-            ("Integration with ERP", "Two-way sync untested at production volume.", 2, 5, "Mitigate", "grace@kendallgroup.com", "Active", 2),
-            ("License overrun", "Seat count growing faster than budget.", 3, 2, "Accept", None, "Active", 2),
-            ("Robot calibration drift", "Pilot robots lose alignment over multi-shift runs.", 3, 4, "Mitigate", "heidi@kendallgroup.com", "Active", 3),
-            ("Safety incident", "Untested human/robot proximity scenarios.", 1, 5, "Mitigate", "ivan@kendallgroup.com", "Monitoring", 3),
-            ("Vendor support response", "Vendor SLA is business-hours only.", 2, 3, "Accept", None, "Active", 3),
+        seed_risks: list[dict[str, Any]] = [
+            # --- ERP Migration (1) ---
+            {  # Avoid
+                "Title": "Steering committee turnover",
+                "RiskDescription": "Exec sponsor retiring mid-project.",
+                "Probability": 2, "Impact": 4,
+                "PMOAction": "Avoid", "RiskStatus": "Active", "ProjectID": 1,
+                "ResponseOwner": "alice@kendallgroup.com",
+                "ResponsePlan": "Reassign sponsorship to CFO before retirement; rewrite charter.",
+                "ResponseTargetDate": date(2026, 6, 30),
+                "ResponseStatus": "In Progress",
+            },
+            {  # Mitigate
+                "Title": "Vendor delivery slips",
+                "RiskDescription": "Vendor has missed two milestones; integration phase at risk.",
+                "Probability": 4, "Impact": 4,
+                "PMOAction": "Mitigate", "RiskStatus": "Active", "ProjectID": 1,
+                "ResponseOwner": "bob@kendallgroup.com",
+                "ResponsePlan": "Weekly vendor review; escalate if 2 more milestones missed.",
+                "ResponseTargetDate": date(2026, 7, 15),
+                "ResponseStatus": "In Progress",
+            },
+            {  # Mitigate (catastrophic)
+                "Title": "Data migration corruption",
+                "RiskDescription": "Possible loss of historical transactions in cutover.",
+                "Probability": 3, "Impact": 5,
+                "PMOAction": "Mitigate", "RiskStatus": "Active", "ProjectID": 1,
+                "ResponseOwner": "carol@kendallgroup.com",
+                "ResponsePlan": "Full backup + parallel run for 2 weeks post-cutover.",
+                "ResponseTargetDate": date(2026, 8, 1),
+                "ResponseStatus": "Not Started",
+            },
+            {  # Transfer
+                "Title": "License overrun",
+                "RiskDescription": "Seat count growing faster than budget.",
+                "Probability": 3, "Impact": 2,
+                "PMOAction": "Transfer", "RiskStatus": "Active", "ProjectID": 1,
+                "ResponseOwner": "dan@kendallgroup.com",
+                "ResponsePlan": "Lock pricing for 3-year term.",
+                "ResponseStatus": "In Progress",
+                "TransferredTo": "ERP Vendor (Acme Co.)",
+                "TransferMechanism": "Contract",
+            },
+            {  # Accept - Active
+                "Title": "User training gap",
+                "RiskDescription": "Floor staff have not been onboarded to new screens.",
+                "Probability": 3, "Impact": 3,
+                "PMOAction": "Accept", "RiskStatus": "Monitoring", "ProjectID": 1,
+                "AcceptanceType": "Active",
+                "ResponseOwner": "frank@kendallgroup.com",
+                "ResponsePlan": "Watch help-desk volume after cutover.",
+                "ResponseStatus": "Not Started",
+                "TriggerCondition": "Help-desk tickets > 10/day for 3 consecutive days",
+                "ContingencyPlan": "Open office-hours sessions + place on-floor coaches.",
+                "ContingencyReserve": "$15k training budget held in reserve.",
+            },
+            # --- CRM Rollout (2) ---
+            {  # Mitigate
+                "Title": "CRM data quality",
+                "RiskDescription": "Account records in source system are inconsistent.",
+                "Probability": 4, "Impact": 4,
+                "PMOAction": "Mitigate", "RiskStatus": "Active", "ProjectID": 2,
+                "ResponseOwner": "grace@kendallgroup.com",
+                "ResponsePlan": "Cleanse vendor list pre-load; spot-check 5% after.",
+                "ResponseTargetDate": date(2026, 7, 1),
+                "ResponseStatus": "In Progress",
+            },
+            {  # Mitigate
+                "Title": "Sales adoption",
+                "RiskDescription": "Reps may resist new pipeline workflow.",
+                "Probability": 3, "Impact": 3,
+                "PMOAction": "Mitigate", "RiskStatus": "Active", "ProjectID": 2,
+                "ResponseOwner": "heidi@kendallgroup.com",
+                "ResponsePlan": "Weekly enablement + champion-rep recognition.",
+                "ResponseTargetDate": date(2026, 9, 1),
+                "ResponseStatus": "Not Started",
+            },
+            {  # Ignore
+                "Title": "Coffee machine in HQ kitchen",
+                "RiskDescription": "Building coffee machine flagged for service.",
+                "Probability": 2, "Impact": 1,
+                "PMOAction": "Ignore", "RiskStatus": "Closed", "ProjectID": 2,
+            },
+            # --- Warehouse Robotics Pilot (3) ---
+            {  # Escalate
+                "Title": "Safety incident",
+                "RiskDescription": "Untested human/robot proximity scenarios.",
+                "Probability": 1, "Impact": 5,
+                "PMOAction": "Escalate", "RiskStatus": "Monitoring", "ProjectID": 3,
+                "ResponseOwner": "eve@kendallgroup.com",
+                "ResponseStatus": "In Progress",
+                "EscalatedTo": "VP Operations / Safety Council",
+            },
+            {  # Mitigate
+                "Title": "Robot calibration drift",
+                "RiskDescription": "Pilot robots lose alignment over multi-shift runs.",
+                "Probability": 3, "Impact": 4,
+                "PMOAction": "Mitigate", "RiskStatus": "Active", "ProjectID": 3,
+                "ResponseOwner": "ivan@kendallgroup.com",
+                "ResponsePlan": "Add nightly calibration cycle; pause line if drift > 0.5mm.",
+                "ResponseTargetDate": date(2026, 6, 15),
+                "ResponseStatus": "In Progress",
+            },
+            {  # Accept - Passive
+                "Title": "Vendor support response",
+                "RiskDescription": "Vendor SLA is business-hours only.",
+                "Probability": 2, "Impact": 3,
+                "PMOAction": "Accept", "RiskStatus": "Active", "ProjectID": 3,
+                "AcceptanceType": "Passive",
+            },
         ]
-        for title, desc, prob, impact, action, owner, status, project_id in seed_risks:
+        for fields in seed_risks:
             rid = next(self._risk_ids)
-            self._risks[rid] = Risk(
-                ID=rid,
-                Title=title,
-                RiskDescription=desc,
-                Probability=prob,
-                Impact=impact,
-                PMOAction=action,
-                RiskOwner=owner,
-                RiskStatus=status,
-                ProjectID=project_id,
-                DateIdentified=date(2026, 4, 1),
-            )
+            data = {
+                "ID": rid,
+                "DateIdentified": date(2026, 4, 1),
+                **fields,
+            }
+            self._risks[rid] = Risk(**_clear_irrelevant(data))
 
     def list_projects(self, status: Optional[str] = None) -> list[Project]:
         with self._lock:
@@ -86,18 +221,11 @@ class MockStore:
             if payload.ProjectID not in self._projects:
                 raise KeyError("ProjectID does not reference an existing project")
             rid = next(self._risk_ids)
-            risk = Risk(
-                ID=rid,
-                Title=payload.Title,
-                RiskDescription=payload.RiskDescription,
-                Probability=payload.Probability,
-                Impact=payload.Impact,
-                PMOAction=payload.PMOAction,
-                RiskOwner=payload.RiskOwner if payload.PMOAction == "Mitigate" else None,
-                RiskStatus=payload.RiskStatus,
-                ProjectID=payload.ProjectID,
-                DateIdentified=date.today(),
-            )
+            data = payload.model_dump()
+            data["ID"] = rid
+            data["DateIdentified"] = date.today()
+            _clear_irrelevant(data)
+            risk = Risk(**data)
             self._risks[rid] = risk
             return risk
 
@@ -109,10 +237,9 @@ class MockStore:
             data = current.model_dump()
             updates = payload.model_dump(exclude_unset=True)
             data.update(updates)
-            if data.get("PMOAction") != "Mitigate":
-                data["RiskOwner"] = None
             if "ProjectID" in updates and updates["ProjectID"] not in self._projects:
                 raise KeyError("ProjectID does not reference an existing project")
+            _clear_irrelevant(data)
             updated = Risk(**data)
             self._risks[risk_id] = updated
             return updated

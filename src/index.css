@@ -328,3 +328,36 @@ input:focus, select:focus, textarea:focus {
   flex-wrap: wrap;
   margin-bottom: 16px;
 }
+
+/* Response sub-form sections (tactic-specific in the entry form) */
+.response-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.response-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.muted-label {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* Tactic-specific lines on the risk card */
+.risk-card .tactic-line {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.risk-card .tactic-line.muted {
+  color: var(--muted);
+}
