@@ -27,10 +27,12 @@ export default function ProjectList() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([api.listProjects('Active'), api.listRisks()])
+    Promise.all([api.listProjects(), api.listRisks()])
       .then(([p, r]) => {
         if (cancelled) return;
-        setProjects(p);
+        // Flow returns all projects so other screens can reuse them;
+        // this screen shows only Active.
+        setProjects(p.filter((x) => x.ProjectStatus === 'Active'));
         setRisks(r);
       })
       .catch((e) => !cancelled && setError(String(e)))

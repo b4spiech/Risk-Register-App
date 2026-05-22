@@ -1,14 +1,31 @@
 import os
-from typing import Optional
+from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from .models import Project, Risk, RiskCreate, RiskUpdate
+from .models import Risk, RiskCreate, RiskUpdate
 from .store import store
+
+# Power Automate flow URL (HTTP-triggered, POST). Set on Railway; absent
+# locally — the /api/projects handler falls back to the mock store.
+GET_PROJECTS_URL = os.environ.get("Get_Projects_URL")
+
+
+def _extract_status(row: dict[str, Any]) -> Optional[str]:
+    """SharePoint's Status column key can collide with reserved names and
+    get auto-renamed at creation. Try `Status` first, then any case-
+    insensitive match."""
+    if "Status" in row:
+        return row["Status"]
+    for k, v in row.items():
+        if k.lower() == "status":
+            return v
+    return None
 
 
 class SPAStaticFiles(StaticFiles):
@@ -39,9 +56,30 @@ app.add_middleware(
 api = APIRouter(prefix="/api")
 
 
-@api.get("/projects", response_model=list[Project])
-def get_projects(status: Optional[str] = Query(default=None)) -> list[Project]:
-    return store.list_projects(status=status)
+@api.get("/projects")
+async def get_projects() -> list[dict[str, Any]]:
+    """Return all projects from the SharePoint list via the Power Automate
+    flow. Frontend filters by status client-side. Falls back to the mock
+    store when the env var is unset, so local dev keeps working until
+    the flow is wired."""
+    if not GET_PROJECTS_URL:
+        return [
+            {"id": p.ID, "title": p.Title, "status": p.ProjectStatus}
+            for p in store.list_projects()
+        ]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(GET_PROJECTS_URL, json={})
+            resp.raise_for_status()
+            rows = resp.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Power Automate flow call failed: {e}")
+    if rows:
+        print("DEBUG first project row keys:", list(rows[0].keys()), flush=True)
+    return [
+        {"id": r.get("ID"), "title": r.get("Title"), "status": _extract_status(r)}
+        for r in rows
+    ]
 
 
 @api.get("/risks", response_model=list[Risk])

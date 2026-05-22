@@ -1,4 +1,12 @@
-import type { Project, Risk, RiskCreatePayload, RiskUpdatePayload } from './types';
+import type { Project, ProjectStatus, Risk, RiskCreatePayload, RiskUpdatePayload } from './types';
+
+// The /api/projects endpoint returns SharePoint rows reshaped to lowercase
+// keys. The rest of the app uses an uppercase Project type, so adapt here.
+interface WireProject {
+  id: number;
+  title: string;
+  status: ProjectStatus;
+}
 
 const BASE = '/api';
 
@@ -16,9 +24,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listProjects(status?: 'Active'): Promise<Project[]> {
-    const q = status ? `?status=${encodeURIComponent(status)}` : '';
-    return request<Project[]>(`/projects${q}`);
+  async listProjects(): Promise<Project[]> {
+    const rows = await request<WireProject[]>('/projects');
+    return rows.map((r) => ({ ID: r.id, Title: r.title, ProjectStatus: r.status }));
   },
   listRisks(projectId?: number): Promise<Risk[]> {
     const q = projectId != null ? `?projectId=${projectId}` : '';
