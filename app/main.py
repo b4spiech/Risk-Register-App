@@ -70,10 +70,35 @@ async def get_projects() -> list[dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(GET_PROJECTS_URL, json={})
-            resp.raise_for_status()
-            rows = resp.json()
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Power Automate flow call failed: {e}")
+        print(f"DEBUG flow request failed before response: {e!r}", flush=True)
+        raise HTTPException(status_code=502, detail=f"Flow request failed: {e}")
+    if resp.status_code >= 400:
+        body = resp.text[:1000]
+        print(
+            f"DEBUG flow returned {resp.status_code} {resp.reason_phrase}; "
+            f"content-type={resp.headers.get('content-type')}; body={body!r}",
+            flush=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Flow returned {resp.status_code}: {body}",
+        )
+    try:
+        rows = resp.json()
+    except ValueError as e:
+        print(
+            f"DEBUG flow returned 200 but body wasn't JSON: "
+            f"content-type={resp.headers.get('content-type')}; body={resp.text[:500]!r}",
+            flush=True,
+        )
+        raise HTTPException(status_code=502, detail=f"Flow returned non-JSON: {e}")
+    if not isinstance(rows, list):
+        print(f"DEBUG flow returned non-list JSON: type={type(rows).__name__}; value={str(rows)[:500]!r}", flush=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Flow returned JSON but not the expected array of rows",
+        )
     if rows:
         print("DEBUG first project row keys:", list(rows[0].keys()), flush=True)
     return [
