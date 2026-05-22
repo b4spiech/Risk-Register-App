@@ -11,9 +11,10 @@ from starlette.responses import Response
 from .models import Risk, RiskCreate, RiskUpdate
 from .store import store
 
-# Power Automate flow URL (HTTP-triggered, POST). Set on Railway; absent
-# locally — the /api/projects handler falls back to the mock store.
-GET_PROJECTS_URL = os.environ.get("Get_Projects_URL")
+# Power Automate flow URL (HTTP-triggered, POST). Set on Railway; the
+# handler reads it per-request so a redeploy isn't required if the var
+# is changed at runtime, and so a missing/typo'd var is visible in logs
+# on every call rather than silently captured as None at import time.
 
 
 def _extract_status(row: dict[str, Any]) -> Optional[str]:
@@ -59,45 +60,44 @@ async def get_projects() -> list[dict[str, Any]]:
     flow. Frontend filters by status client-side. Falls back to the mock
     store when the env var is unset, so local dev keeps working until
     the flow is wired."""
-    if not GET_PROJECTS_URL:
+    url = os.environ.get("Get_Projects_URL")
+    print(
+        f"[projects] env var present: {url is not None}; "
+        f"url starts: {url[:60] if url else 'MISSING'}",
+        flush=True,
+    )
+    if not url:
+        print("[projects] FALLBACK to mock store (no flow call made)", flush=True)
         return [
             {"id": p.ID, "title": p.Title, "status": p.ProjectStatus}
             for p in store.list_projects()
         ]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(GET_PROJECTS_URL, json={})
-    except httpx.HTTPError as e:
-        print(f"DEBUG flow request failed before response: {e!r}", flush=True)
-        raise HTTPException(status_code=502, detail=f"Flow request failed: {e}")
-    if resp.status_code >= 400:
-        body = resp.text[:1000]
-        print(
-            f"DEBUG flow returned {resp.status_code} {resp.reason_phrase}; "
-            f"content-type={resp.headers.get('content-type')}; body={body!r}",
-            flush=True,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Flow returned {resp.status_code}: {body}",
-        )
-    try:
-        rows = resp.json()
-    except ValueError as e:
-        print(
-            f"DEBUG flow returned 200 but body wasn't JSON: "
-            f"content-type={resp.headers.get('content-type')}; body={resp.text[:500]!r}",
-            flush=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Flow returned non-JSON: {e}")
+            print("[projects] sending POST to flow...", flush=True)
+            resp = await client.post(url, json={})
+            print(
+                f"[projects] flow responded: HTTP {resp.status_code}, "
+                f"{len(resp.text)} bytes",
+                flush=True,
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+    except Exception as e:
+        print(f"[projects] flow call FAILED: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(status_code=502, detail=str(e))
     if not isinstance(rows, list):
-        print(f"DEBUG flow returned non-list JSON: type={type(rows).__name__}; value={str(rows)[:500]!r}", flush=True)
+        print(
+            f"[projects] flow returned non-list JSON: type={type(rows).__name__}; "
+            f"value={str(rows)[:500]!r}",
+            flush=True,
+        )
         raise HTTPException(
             status_code=502,
             detail="Flow returned JSON but not the expected array of rows",
         )
     if rows:
-        print("DEBUG first project row keys:", list(rows[0].keys()), flush=True)
+        print(f"[projects] first row keys: {list(rows[0].keys())}", flush=True)
     return [
         {"id": r.get("ID"), "title": r.get("Title"), "status": _extract_status(r)}
         for r in rows
