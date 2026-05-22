@@ -29,11 +29,9 @@
   },
   "deploy": {
     "inputs": [
-      { "step": "frontend" },
-      {
-        "local": true,
-        "include": ["app"]
-      }
+      "...",
+      { "step": "frontend", "include": ["dist"] },
+      { "local": true, "include": ["app"] }
     ],
     "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
   }
