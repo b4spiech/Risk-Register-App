@@ -38,7 +38,6 @@ export default function ProjectDetail() {
   const [cellFilter, setCellFilter] = useState<{ probability: number; impact: number } | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Risk | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,6 +56,14 @@ export default function ProjectDetail() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
+  }, [pid]);
+
+  // Re-fetch just risks (no full-screen loading spinner) — used after
+  // a successful create so the new card can appear in place.
+  const reloadRisks = useCallback(async (): Promise<Risk[]> => {
+    const rs = await api.listRisks(pid);
+    setRisks(rs);
+    return rs;
   }, [pid]);
 
   useEffect(() => {
@@ -83,15 +90,28 @@ export default function ProjectDetail() {
     setCellFilter(null);
   }, [tab]);
 
-  async function handleSubmit(payload: RiskCreatePayload, editingId?: number) {
-    if (editingId != null) {
-      await api.updateRisk(editingId, payload);
-      setFlash('Risk updated.');
-    } else {
-      await api.createRisk(payload);
-      setFlash('Risk created — it will appear in the list shortly.');
+  async function handleSubmit(payload: RiskCreatePayload) {
+    await api.createRisk(payload);
+    const matches = (rs: Risk[]) =>
+      rs.some((r) => r.Title === payload.Title && r.ProjectID === payload.ProjectID);
+
+    // First re-fetch usually wins; if SharePoint hasn't reflected the
+    // write yet, wait briefly and retry exactly once. Avoid hammering.
+    let fresh = await reloadRisks();
+    if (!matches(fresh)) {
+      await new Promise((r) => setTimeout(r, 1200));
+      fresh = await reloadRisks();
     }
-    reload();
+
+    if (matches(fresh)) {
+      setFlash('Risk created.');
+    } else if (payload.ProjectID !== pid) {
+      setFlash(
+        `Risk created under a different project (id ${payload.ProjectID}); switch to that project to see it.`,
+      );
+    } else {
+      setFlash("Risk created. SharePoint hasn't reflected it yet — refresh in a moment.");
+    }
   }
 
   if (loading) return <div className="empty">Loading…</div>;
@@ -115,10 +135,7 @@ export default function ProjectDetail() {
         </div>
         <button
           className="primary"
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
+          onClick={() => setFormOpen(true)}
         >
           + New risk
         </button>
@@ -142,23 +159,15 @@ export default function ProjectDetail() {
       ) : (
         <div className="grid grid-cards">
           {cardRisks.map((r) => (
-            <RiskCard
-              key={r.ID}
-              risk={r}
-              onEdit={() => {
-                setEditing(r);
-                setFormOpen(true);
-              }}
-            />
+            <RiskCard key={r.ID} risk={r} />
           ))}
         </div>
       )}
 
       <RiskForm
         open={formOpen}
-        projects={projects.filter((p) => p.ProjectStatus === 'Active' || p.ID === editing?.ProjectID)}
+        projects={projects.filter((p) => p.ProjectStatus === 'Active')}
         defaultProjectId={pid}
-        editing={editing}
         onClose={() => setFormOpen(false)}
         onSubmit={handleSubmit}
       />

@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getScore, getSeverity } from '../lib/severity';
-import type { Project, Risk, RiskCreatePayload } from '../lib/types';
+import type { Project, RiskCreatePayload } from '../lib/types';
 
 interface Props {
   open: boolean;
   projects: Project[];
   defaultProjectId?: number;
-  editing?: Risk | null;
   onClose: () => void;
-  onSubmit: (payload: RiskCreatePayload, editingId?: number) => Promise<void>;
+  onSubmit: (payload: RiskCreatePayload) => Promise<void>;
 }
 
 const SCALE = [1, 2, 3, 4, 5];
@@ -28,16 +27,6 @@ const EMPTY: FormState = {
   Probability: null,
   Impact: null,
 };
-
-function fromRisk(r: Risk): FormState {
-  return {
-    Title: r.Title,
-    RiskDescription: r.RiskDescription,
-    ProjectID: r.ProjectID,
-    Probability: r.Probability,
-    Impact: r.Impact,
-  };
-}
 
 function validate(s: FormState): Record<string, string> {
   const e: Record<string, string> = {};
@@ -63,7 +52,6 @@ export default function RiskForm({
   open,
   projects,
   defaultProjectId,
-  editing,
   onClose,
   onSubmit,
 }: Props) {
@@ -73,9 +61,9 @@ export default function RiskForm({
 
   useEffect(() => {
     if (!open) return;
-    setState(editing ? fromRisk(editing) : { ...EMPTY, ProjectID: defaultProjectId ?? null });
+    setState({ ...EMPTY, ProjectID: defaultProjectId ?? null });
     setErrors({});
-  }, [open, editing, defaultProjectId]);
+  }, [open, defaultProjectId]);
 
   const preview = useMemo(() => {
     if (state.Probability == null || state.Impact == null) return null;
@@ -98,7 +86,7 @@ export default function RiskForm({
     if (Object.keys(e).length > 0) return;
     setSubmitting(true);
     try {
-      await onSubmit(buildPayload(state), editing?.ID);
+      await onSubmit(buildPayload(state));
       onClose();
     } catch (err) {
       setErrors({ _form: String(err) });
@@ -111,7 +99,7 @@ export default function RiskForm({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>{editing ? 'Edit risk' : 'New risk'}</h3>
+          <h3>New risk</h3>
           <button onClick={onClose} aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -198,7 +186,7 @@ export default function RiskForm({
               Cancel
             </button>
             <button type="submit" className="primary" disabled={submitting}>
-              {submitting ? 'Saving…' : editing ? 'Save changes' : 'Create risk'}
+              {submitting ? 'Saving…' : 'Create risk'}
             </button>
           </div>
         </form>

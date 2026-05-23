@@ -45,5 +45,3 @@ export interface RiskCreatePayload {
   Impact: number;
   ProjectID: number;
 }
-
-export type RiskUpdatePayload = Partial<RiskCreatePayload>;

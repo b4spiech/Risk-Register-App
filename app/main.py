@@ -2,21 +2,19 @@ import os
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from .models import Risk, RiskCreate, RiskUpdate
 from .store import store
 
 
 class CreateRiskBody(BaseModel):
-    """Payload the front-end sends to POST /api/risks. The flow only
-    accepts these 5 fields today; the rich Risk model still describes
-    what reads return so existing render code keeps working."""
+    """Payload the front-end POSTs to /api/risks. The "Create Risk" flow
+    accepts these 5 fields; everything else lives in SharePoint."""
 
     Title: str
     RiskDescription: str
@@ -24,19 +22,30 @@ class CreateRiskBody(BaseModel):
     Impact: int = Field(ge=1, le=5)
     ProjectID: int
 
-# Power Automate flow URL (HTTP-triggered, POST). Set on Railway; the
-# handler reads it per-request so a redeploy isn't required if the var
-# is changed at runtime, and so a missing/typo'd var is visible in logs
-# on every call rather than silently captured as None at import time.
-
 
 def _extract_status(row: dict[str, Any]) -> Optional[str]:
-    """SharePoint Choice columns come back as {Id, Value} objects, not plain
-    strings. Read .Value when nested, otherwise pass through."""
+    """SharePoint Choice columns come back as {Id, Value} objects. Read
+    .Value when nested, otherwise pass the raw value through."""
     status = row.get("Status")
     if isinstance(status, dict):
         return status.get("Value")
     return status
+
+
+def _reshape_risk(row: dict[str, Any]) -> dict[str, Any]:
+    """SharePoint Risk row → wire shape the front-end consumes.
+
+    Plain text and number columns — bare values. When Choice columns
+    like PMOAction/RiskStatus get added, those will arrive as {Id,
+    Value} objects and need the same unwrap as Status above."""
+    return {
+        "id": row.get("ID"),
+        "title": row.get("Title"),
+        "description": row.get("RiskDescription"),
+        "probability": row.get("Probability"),
+        "impact": row.get("Impact"),
+        "projectId": row.get("ProjectID"),
+    }
 
 
 class SPAStaticFiles(StaticFiles):
@@ -55,6 +64,7 @@ class SPAStaticFiles(StaticFiles):
                 return await super().get_response("index.html", scope)
             raise
 
+
 app = FastAPI(title="Risk Register API")
 
 app.add_middleware(
@@ -68,11 +78,12 @@ api = APIRouter(prefix="/api")
 
 
 @api.get("/projects")
-async def get_projects() -> list[dict[str, Any]]:
+async def get_projects(response: Response) -> list[dict[str, Any]]:
     """Return all projects from the SharePoint list via the Power Automate
     flow. Frontend filters by status client-side. Falls back to the mock
     store when the env var is unset, so local dev keeps working until
     the flow is wired."""
+    response.headers["Cache-Control"] = "no-store"
     url = os.environ.get("Get_Projects_URL")
     print(
         f"[projects] env var present: {url is not None}; "
@@ -117,41 +128,55 @@ async def get_projects() -> list[dict[str, Any]]:
     ]
 
 
-@api.get("/risks", response_model=list[Risk])
-def get_risks(projectId: Optional[int] = Query(default=None)) -> list[Risk]:
-    return store.list_risks(project_id=projectId)
+@api.get("/risks")
+async def get_risks(response: Response) -> list[dict[str, Any]]:
+    """Read all risks from the SharePoint Risk Register Master via the
+    Get_Risk_URL Power Automate flow. NO fallback — SharePoint is the
+    single source of truth. Empty list is a valid result. Frontend
+    filters by ProjectID. Response is Cache-Control: no-store so a
+    re-fetch after a create always hits the upstream."""
+    response.headers["Cache-Control"] = "no-store"
+    url = os.environ["Get_Risk_URL"]  # loud KeyError → 500 if missing
+    print(f"[risks-get] url starts: {url[:60]}", flush=True)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            print("[risks-get] sending POST to flow...", flush=True)
+            resp = await client.post(url, json={})
+            print(
+                f"[risks-get] flow responded: HTTP {resp.status_code}, "
+                f"{len(resp.text)} bytes",
+                flush=True,
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+    except Exception as e:
+        print(f"[risks-get] flow call FAILED: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(status_code=502, detail=str(e))
+    if not isinstance(rows, list):
+        print(
+            f"[risks-get] flow returned non-list JSON: type={type(rows).__name__}; "
+            f"value={str(rows)[:500]!r}",
+            flush=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Flow returned JSON but not the expected array of rows",
+        )
+    if rows:
+        print(f"[risks-get] first row keys: {list(rows[0].keys())}", flush=True)
+    reshaped = [_reshape_risk(row) for row in rows]
+    print(f"[risks-get] returning {len(reshaped)} risks", flush=True)
+    return reshaped
 
 
 @api.post("/risks", status_code=201)
 async def create_risk(body: CreateRiskBody) -> dict[str, Any]:
     """Forward a new risk to the SharePoint "Create Risk" Power Automate
-    flow. The shared secret is added server-side so the browser never
-    sees it. Falls back to the in-memory store when env vars are unset
-    so local dev keeps working."""
-    url = os.environ.get("Create_Risk_URL")
-    secret = os.environ.get("Risk_Secret")
-    print(
-        f"[risks] env vars present: url={url is not None} secret={secret is not None}; "
-        f"url starts: {url[:60] if url else 'MISSING'}",
-        flush=True,
-    )
-    if not url or not secret:
-        print("[risks] FALLBACK to mock store (no flow call made)", flush=True)
-        try:
-            store.create_risk(
-                RiskCreate(
-                    Title=body.Title,
-                    RiskDescription=body.RiskDescription,
-                    Probability=body.Probability,
-                    Impact=body.Impact,
-                    ProjectID=body.ProjectID,
-                    PMOAction="Mitigate",
-                    RiskStatus="Active",
-                )
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"status": "created"}
+    flow. Shared secret is added server-side so the browser never sees
+    it. NO fallback — SharePoint is the single source of truth."""
+    url = os.environ["Create_Risk_URL"]  # loud KeyError → 500 if missing
+    secret = os.environ["Risk_Secret"]
+    print(f"[risks] url starts: {url[:60]}", flush=True)
 
     # Ints (not strings) — SharePoint Number columns reject quoted strings.
     flow_payload = {
@@ -179,17 +204,6 @@ async def create_risk(body: CreateRiskBody) -> dict[str, Any]:
         return resp.json()
     except ValueError:
         return {"status": "created"}
-
-
-@api.patch("/risks/{risk_id}", response_model=Risk)
-def update_risk(risk_id: int, payload: RiskUpdate) -> Risk:
-    try:
-        updated = store.update_risk(risk_id, payload)
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Risk not found")
-    return updated
 
 
 @api.get("/healthz")

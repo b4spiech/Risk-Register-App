@@ -4,7 +4,6 @@ import type { Risk } from '../lib/types';
 
 interface Props {
   risk: Risk;
-  onEdit: () => void;
 }
 
 function actionLabel(risk: Risk): string {
@@ -18,7 +17,7 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
-export default function RiskCard({ risk, onEdit }: Props) {
+export default function RiskCard({ risk }: Props) {
   const band = getSeverity(risk.Probability, risk.Impact);
   const score = getScore(risk.Probability, risk.Impact);
   const [expanded, setExpanded] = useState(false);
@@ -106,9 +105,6 @@ export default function RiskCard({ risk, onEdit }: Props) {
             </a>
           </>
         )}
-      </div>
-      <div className="actions">
-        <button onClick={onEdit}>Edit</button>
       </div>
     </div>
   );
