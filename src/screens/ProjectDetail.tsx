@@ -39,6 +39,13 @@ export default function ProjectDetail() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Risk | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 4000);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -79,8 +86,10 @@ export default function ProjectDetail() {
   async function handleSubmit(payload: RiskCreatePayload, editingId?: number) {
     if (editingId != null) {
       await api.updateRisk(editingId, payload);
+      setFlash('Risk updated.');
     } else {
       await api.createRisk(payload);
+      setFlash('Risk created — it will appear in the list shortly.');
     }
     reload();
   }
@@ -153,6 +162,12 @@ export default function ProjectDetail() {
         onClose={() => setFormOpen(false)}
         onSubmit={handleSubmit}
       />
+
+      {flash && (
+        <div className="flash" role="status" onClick={() => setFlash(null)}>
+          {flash}
+        </div>
+      )}
     </>
   );
 }

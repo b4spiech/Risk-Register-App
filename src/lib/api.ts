@@ -32,8 +32,8 @@ export const api = {
     const q = projectId != null ? `?projectId=${projectId}` : '';
     return request<Risk[]>(`/risks${q}`);
   },
-  createRisk(payload: RiskCreatePayload): Promise<Risk> {
-    return request<Risk>('/risks', {
+  createRisk(payload: RiskCreatePayload): Promise<{ status?: string }> {
+    return request<{ status?: string }>('/risks', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

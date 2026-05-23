@@ -5,11 +5,24 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from .models import Risk, RiskCreate, RiskUpdate
 from .store import store
+
+
+class CreateRiskBody(BaseModel):
+    """Payload the front-end sends to POST /api/risks. The flow only
+    accepts these 5 fields today; the rich Risk model still describes
+    what reads return so existing render code keeps working."""
+
+    Title: str
+    RiskDescription: str
+    Probability: int = Field(ge=1, le=5)
+    Impact: int = Field(ge=1, le=5)
+    ProjectID: int
 
 # Power Automate flow URL (HTTP-triggered, POST). Set on Railway; the
 # handler reads it per-request so a redeploy isn't required if the var
@@ -109,12 +122,63 @@ def get_risks(projectId: Optional[int] = Query(default=None)) -> list[Risk]:
     return store.list_risks(project_id=projectId)
 
 
-@api.post("/risks", response_model=Risk, status_code=201)
-def create_risk(payload: RiskCreate) -> Risk:
+@api.post("/risks", status_code=201)
+async def create_risk(body: CreateRiskBody) -> dict[str, Any]:
+    """Forward a new risk to the SharePoint "Create Risk" Power Automate
+    flow. The shared secret is added server-side so the browser never
+    sees it. Falls back to the in-memory store when env vars are unset
+    so local dev keeps working."""
+    url = os.environ.get("Create_Risk_URL")
+    secret = os.environ.get("Risk_Secret")
+    print(
+        f"[risks] env vars present: url={url is not None} secret={secret is not None}; "
+        f"url starts: {url[:60] if url else 'MISSING'}",
+        flush=True,
+    )
+    if not url or not secret:
+        print("[risks] FALLBACK to mock store (no flow call made)", flush=True)
+        try:
+            store.create_risk(
+                RiskCreate(
+                    Title=body.Title,
+                    RiskDescription=body.RiskDescription,
+                    Probability=body.Probability,
+                    Impact=body.Impact,
+                    ProjectID=body.ProjectID,
+                    PMOAction="Mitigate",
+                    RiskStatus="Active",
+                )
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"status": "created"}
+
+    # Ints (not strings) — SharePoint Number columns reject quoted strings.
+    flow_payload = {
+        "secret": secret,
+        "Title": body.Title,
+        "RiskDescription": body.RiskDescription,
+        "Probability": int(body.Probability),
+        "Impact": int(body.Impact),
+        "ProjectID": int(body.ProjectID),
+    }
     try:
-        return store.create_risk(payload)
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        async with httpx.AsyncClient(timeout=30) as client:
+            print("[risks] sending POST to Create Risk flow...", flush=True)
+            resp = await client.post(url, json=flow_payload)
+            print(
+                f"[risks] flow responded: HTTP {resp.status_code}, "
+                f"{len(resp.text)} bytes",
+                flush=True,
+            )
+            resp.raise_for_status()
+    except Exception as e:
+        print(f"[risks] flow call FAILED: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(status_code=502, detail=str(e))
+    try:
+        return resp.json()
+    except ValueError:
+        return {"status": "created"}
 
 
 @api.patch("/risks/{risk_id}", response_model=Risk)

@@ -329,6 +329,23 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 16px;
 }
 
+/* Transient confirmation toast (e.g. after a successful create) */
+.flash {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--green);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  z-index: 100;
+  max-width: 360px;
+}
+
 /* Response sub-form sections (tactic-specific in the entry form) */
 .response-section {
   border: 1px solid var(--border);

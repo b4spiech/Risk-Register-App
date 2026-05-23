@@ -34,25 +34,16 @@ export interface Risk {
   ContingencyReserve: string | null;
 }
 
+// The live Create Risk Power Automate flow only accepts these 5 fields
+// today. PMBOK response fields aren't in the SharePoint schema yet, so
+// they're not in the create payload. When SharePoint adds those columns,
+// re-expand this interface (and the form).
 export interface RiskCreatePayload {
   Title: string;
   RiskDescription: string;
   Probability: number;
   Impact: number;
-  PMOAction: PMOAction;
-  RiskStatus: RiskStatus;
   ProjectID: number;
-  ResponseOwner?: string | null;
-  ResponsePlan?: string | null;
-  ResponseTargetDate?: string | null;
-  ResponseStatus?: ResponseStatus | null;
-  TransferredTo?: string | null;
-  TransferMechanism?: TransferMechanism | null;
-  EscalatedTo?: string | null;
-  AcceptanceType?: AcceptanceType | null;
-  TriggerCondition?: string | null;
-  ContingencyPlan?: string | null;
-  ContingencyReserve?: string | null;
 }
 
 export type RiskUpdatePayload = Partial<RiskCreatePayload>;
